@@ -11,6 +11,8 @@ from .serializing_backend import (
   SerializingSavingBackend,
 )
 from .tecan.EVO import EVO
+from .unitelabs_silas import UnitelabsSilasBackend
+from .tecan_silas_backend import TecanSiLABackend
 
 # many rely on this
 from .websocket import WebSocketBackend

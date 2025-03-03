@@ -29,6 +29,8 @@ extras_inheco = ["hid"]
 
 extras_agrow = ["pymodbus==3.6.8"]
 
+extras_silas = ["unitelabs.silas"]
+
 extras_dev = (
   extras_fw
   + extras_http
@@ -39,6 +41,7 @@ extras_dev = (
   + extras_server
   + extras_inheco
   + extras_agrow
+  + extras_silas
   + [
     "pydata-sphinx-theme",
     "myst_nb",
@@ -77,6 +80,7 @@ setup(
     "opentrons": extras_opentrons,
     "server": extras_server,
     "agrow": extras_agrow,
+    "silas": extras_silas,
     "dev": extras_dev,
     "all": extras_all,
   },
