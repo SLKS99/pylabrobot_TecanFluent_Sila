@@ -29,7 +29,7 @@ extras_inheco = ["hid"]
 
 extras_agrow = ["pymodbus==3.6.8"]
 
-extras_silas = ["sila2"]
+extras_silas = ["tecan-fluent-sila2-connector"]
 
 extras_dev = (
   extras_fw
