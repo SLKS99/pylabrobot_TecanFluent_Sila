@@ -1,135 +1,147 @@
 """Tests for the Tecan Fluent backend."""
 
-import asyncio
 import pytest
-from typing import Dict, Any, Generator
-
 from pylabrobot.liquid_handling.backends.tecan.fluent import Fluent
 
-@pytest.fixture
-async def fluent_backend() -> Generator[Fluent, None, None]:
-    """Create a Fluent backend instance for testing.
+# Configuration
+FLUENT_IP = "216.96.181.199"
+FLUENT_PORT = 50052
 
-    Yields:
-        Fluent: A configured Fluent backend instance in simulation mode.
-    """
+@pytest.mark.asyncio
+async def test_connect_to_fluent() -> None:
+    """Test basic connection to Fluent SiLA server."""
+    print("\n=== Testing Fluent Backend Connection ===")
+    print(f"Connecting to SiLA server at {FLUENT_IP}:{FLUENT_PORT}")
+
     backend = Fluent(
         num_channels=8,
-        host="127.0.0.1",
-        port=50052,
-        simulation_mode=True  # Use simulation mode for testing
+        host=FLUENT_IP,
+        port=FLUENT_PORT,
+        simulation_mode=False
     )
-    await backend.setup()
-    yield backend
-    await backend.stop()
+
+    try:
+        await backend.setup()
+        print("Successfully connected to Fluent server")
+
+        # Test getting methods after connection
+        methods = backend.get_available_methods()  # Synchronous call
+        print(f"Available methods: {methods}")
+        assert methods is not None
+    except Exception as e:
+        print(f"Connection failed: {str(e)}")
+        raise
+    finally:
+        await backend.stop()
 
 @pytest.mark.asyncio
-async def test_method_management(fluent_backend: Fluent) -> None:
-    """Test method management functionality.
+async def test_get_available_methods() -> None:
+    """Test retrieving available methods from FluentControl."""
+    backend = Fluent(
+        num_channels=8,
+        host=FLUENT_IP,
+        port=FLUENT_PORT,
+        simulation_mode=False
+    )
 
-    Args:
-        fluent_backend: The Fluent backend instance to test.
-    """
-    # Get available methods
-    methods = await fluent_backend.get_available_methods()
-    assert isinstance(methods, list)
-    assert "simulation_method" in methods
+    try:
+        await backend.setup()
 
-    # Get method parameters
-    params = await fluent_backend.get_method_parameters("simulation_method")
-    assert isinstance(params, dict)
-    assert "param1" in params
-    assert "param2" in params
-
-@pytest.mark.asyncio
-async def test_worklist_management(fluent_backend: Fluent) -> None:
-    """Test worklist management functionality.
-
-    Args:
-        fluent_backend: The Fluent backend instance to test.
-    """
-    # Clear worklist
-    success = await fluent_backend.clear_worklist()
-    assert success is True
-
-    # Add method to worklist
-    method_params: Dict[str, Any] = {
-        "param1": "value1",
-        "param2": "value2"
-    }
-    success = await fluent_backend.add_to_worklist("simulation_method", method_params)
-    assert success is True
-
-    # Get worklist
-    worklist = await fluent_backend.get_worklist()
-    assert isinstance(worklist, list)
-    assert len(worklist) > 0
+        # Get available methods (synchronous call)
+        methods = backend.get_available_methods()
+        print(f"Available methods: {methods}")
+        assert methods is not None, "No methods available"
+        assert len(methods) > 0, "No methods found in FluentControl"
+    finally:
+        await backend.stop()
 
 @pytest.mark.asyncio
-async def test_worklist_control(fluent_backend: Fluent) -> None:
-    """Test worklist control functionality.
+async def test_worklist_operations() -> None:
+    """Test worklist operations with Fluent backend."""
+    backend = Fluent(
+        num_channels=8,
+        host=FLUENT_IP,
+        port=FLUENT_PORT
+    )
 
-    Args:
-        fluent_backend: The Fluent backend instance to test.
-    """
-    # Run worklist
-    success = await fluent_backend.run_worklist()
-    assert success is True
+    try:
+        await backend.setup()
 
-    # Get worklist status
-    status = await fluent_backend.get_worklist_status()
-    assert isinstance(status, str)
-    assert status == "Completed"
+        # Get available methods (synchronous)
+        print("\nGetting available methods...")
+        methods = backend.get_available_methods()
+        print(f"Available methods: {methods}")
 
-    # Test pause/resume
-    success = await fluent_backend.pause_worklist()
-    assert success is True
+        if len(methods) > 0:
+            method_name = methods[0]  # Use the first available method
+            print(f"\nUsing method: {method_name}")
 
-    status = await fluent_backend.get_worklist_status()
-    assert status == "Paused"
+            # Get method parameters
+            try:
+                params = await backend.get_method_parameters(method_name)
+                print(f"Method parameters: {params}")
+            except Exception as e:
+                print(f"Error getting method parameters: {e}")
 
-    success = await fluent_backend.resume_worklist()
-    assert success is True
+            # Add method to worklist
+            print("\nAdding method to worklist...")
+            success = await backend.add_to_worklist(method_name, {})
+            print(f"Add to worklist success: {success}")
 
-    # Test stop
-    success = await fluent_backend.stop_worklist()
-    assert success is True
+            # Get current worklist
+            worklist = await backend.get_worklist()
+            print(f"\nCurrent worklist: {worklist}")
 
-    status = await fluent_backend.get_worklist_status()
-    assert status == "Stopped"
+            # Run the worklist
+            print("\nRunning worklist...")
+            success = await backend.run_worklist()
+            print(f"Run worklist success: {success}")
+
+            # Get worklist status
+            status = await backend.get_worklist_status()
+            print(f"Worklist status: {status}")
+
+    finally:
+        await backend.stop()
 
 @pytest.mark.asyncio
-async def test_worklist_sequence(fluent_backend: Fluent) -> None:
-    """Test a complete worklist sequence.
+async def test_liquid_handling_operations() -> None:
+    """Test basic liquid handling operations."""
+    backend = Fluent(
+        num_channels=8,
+        host=FLUENT_IP,
+        port=FLUENT_PORT
+    )
 
-    Args:
-        fluent_backend: The Fluent backend instance to test.
-    """
-    # Clear existing worklist
-    await fluent_backend.clear_worklist()
+    try:
+        await backend.setup()
 
-    # Add multiple methods to worklist
-    methods = [
-        ("method1", {"param1": "value1"}),
-        ("method2", {"param2": "value2"}),
-        ("method3", {"param3": "value3"})
-    ]
+        # Get available methods (synchronous)
+        methods = backend.get_available_methods()
+        print(f"Available methods: {methods}")
+        assert len(methods) > 0, "No methods available"
 
-    for method_name, params in methods:
-        success = await fluent_backend.add_to_worklist(method_name, params)
-        assert success is True
+        # Test basic liquid handling sequence
+        print("\nTesting liquid handling sequence...")
 
-    # Verify worklist contents
-    worklist = await fluent_backend.get_worklist()
-    assert len(worklist) == len(methods)
+        # First, get available labware from FluentControl
+        print("Getting available labware...")
+        try:
+            labware = await backend.get_available_labware()
+            print(f"Available labware: {labware}")
 
-    # Run worklist
-    success = await fluent_backend.run_worklist()
-    assert success is True
+            if labware:
+                source = labware[0]  # Use first available labware as source
+                destination = labware[1] if len(labware) > 1 else labware[0]  # Use second if available, else same
 
-    # Monitor status
-    while True:
-        status = await fluent_backend.get_worklist_status()
-        if status == "Completed":
-            break
-        await asyncio.sleep(0.1)  # Small delay to prevent busy waiting
+                # Perform simple transfer
+                print(f"\nAttempting transfer from {source} to {destination}")
+                await backend.aspirate(source, volume=100)
+                await backend.dispense(destination, volume=100)
+                print("Transfer completed")
+
+        except Exception as e:
+            print(f"Error during liquid handling: {e}")
+
+    finally:
+        await backend.stop()

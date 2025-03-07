@@ -1,19 +1,23 @@
-"""Backend implementation for controlling Tecan Fluent using the official Tecan Fluent SiLA2 connector."""
+"""Backend implementation for controlling Tecan Fluent using the official Tecan Fluent SiLA2 connector.
+
+This backend assumes:
+1. The Tecan Fluent SiLA server is already running (started separately)
+2. The tecan.fluent package is installed in the virtual environment
+3. The server is accessible at the specified host and port
+"""
 
 import logging
+import sys
 from typing import Any, Dict, List, Optional, Union, cast
+import asyncio
+import warnings
 
 # Import SiLA2 connector with detailed error handling
 HAS_TECAN_SILA = False
 try:
-    from tecan.fluent import Fluent as TecanFluent
-    from tecan.fluent import DiTi, Labware, Liquid, Position
-    from tecan.fluent import SiLA2Error, ConnectionError, AuthenticationError
+    from tecan import Fluent as TecanFluent
     HAS_TECAN_SILA = True
-    print("Successfully imported tecan.fluent module.")
 except ImportError as e:
-    import warnings
-    import sys
     warnings.warn(
         f"\nTecan Fluent SiLA2 connector not found: {e}"
         "\nTo use this backend:"
@@ -50,8 +54,6 @@ class Fluent(LiquidHandlerBackend):
         host: str = "127.0.0.1",
         port: int = 50052,
         insecure: bool = True,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
         discovery_time: int = 10,
         method_name: str = "pylabrobot",
         operation_timeout: int = 30,
@@ -65,8 +67,6 @@ class Fluent(LiquidHandlerBackend):
             host: The hostname where the Tecan Fluent SiLA server is running.
             port: The port where the Tecan Fluent SiLA server is running.
             insecure: Whether to use insecure connection (no SSL).
-            username: Username for UMS authentication (optional).
-            password: Password for UMS authentication (optional).
             discovery_time: Time in seconds to wait for server discovery (optional).
             method_name: Name of the Fluent method to use (must be loaded in FluentControl).
             operation_timeout: Timeout for operation in seconds (optional).
@@ -94,8 +94,6 @@ class Fluent(LiquidHandlerBackend):
         self.host = host
         self.port = port
         self.insecure = insecure
-        self.username = username
-        self.password = password
         self.discovery_time = discovery_time
         self.method_name = method_name
         self.operation_timeout = operation_timeout
@@ -114,18 +112,68 @@ class Fluent(LiquidHandlerBackend):
         return self._num_channels
 
     async def setup(self) -> None:
-        """Set up the connection to the Fluent server."""
+        """Set up the connection to the Fluent server.
+
+        This method:
+        1. Creates a connection to the existing SiLA server using the Tecan connector
+        2. Starts FluentControl and waits for it to be ready
+        3. Validates the connection is working
+
+        Raises:
+            ConnectionError: If the server is not running or not accessible
+            RuntimeError: If FluentControl is not properly initialized
+        """
+        if TecanFluent is None:
+            raise RuntimeError(
+                "Tecan Fluent SiLA2 connector not found. "
+                "Please contact Tecan support for access to their SiLA2 connector package."
+            )
         try:
             self.logger.info(f"Connecting to Fluent server at {self.host}:{self.port}")
+
+            # Create the SiLA client (does not start a server)
             self.fluent = TecanFluent(
                 self.host,
                 self.port,
-                insecure=self.insecure,
-                username=self.username,
-                password=self.password
+                insecure=self.insecure
             )
-            self.fluent.start_fluent()
+
+            # Start FluentControl if needed
+            self.logger.info("Starting FluentControl...")
+            try:
+                self.fluent.start_fluent()
+                self.logger.info("FluentControl start command sent")
+            except Exception as e:
+                self.logger.warning(f"Could not start FluentControl (it may already be running): {e}")
+
+            # Subscribe to state changes
+            def state_changed_callback(state):
+                self.logger.info(f"FluentControl state changed to: {state}")
+            self.fluent.subscribe_state(state_changed_callback)
+
+            # Check current state
+            current_state = self.fluent.state
+            self.logger.info(f"Current FluentControl state: {current_state}")
+
+            # Try to get available methods to verify connection
+            try:
+                self.logger.info("Getting available methods...")
+                methods = self.fluent.get_all_runnable_methods()
+                self.logger.info(f"Available methods: {methods}")
+                if not methods:
+                    self.logger.warning("No methods available in FluentControl")
+            except Exception as e:
+                self.logger.error(
+                    "Could not get available methods. "
+                    "Please ensure a method is loaded in FluentControl."
+                )
+                raise RuntimeError(
+                    "Failed to get available methods. "
+                    "Please ensure FluentControl has a method loaded."
+                ) from e
+
             self.logger.info("Successfully connected to Fluent server")
+
         except Exception as e:
             self.logger.error(f"Failed to connect to Fluent server: {e}")
             raise
@@ -134,49 +182,92 @@ class Fluent(LiquidHandlerBackend):
         """Stop the connection to the Fluent server."""
         if self.fluent:
             try:
-                self.fluent.stop()
-                self.logger.info("Successfully stopped Fluent server connection")
+                # Don't stop the server, just clean up our connection
+                self.fluent = None
+                self.logger.info("Successfully disconnected from Fluent server")
             except Exception as e:
-                self.logger.error(f"Error stopping Fluent server: {e}")
+                self.logger.error(f"Error disconnecting from Fluent server: {e}")
                 raise
 
     # SiLA Worklist and Method Management Methods
 
-    async def get_available_methods(self) -> List[str]:
+    def get_available_methods(self) -> List[str]:
         """Get a list of available methods from the Fluent server.
 
         Returns:
             List[str]: List of available method names.
         """
+        if not self.fluent:
+            raise RuntimeError("Fluent backend not initialized. Call setup() first.")
+
         if self.simulation_mode:
             return ["simulation_method"]
 
         try:
-            methods = await self.fluent.get_available_methods()
+            # get_all_runnable_methods is synchronous
+            methods = self.fluent.get_all_runnable_methods()
             self.logger.info(f"Retrieved {len(methods)} available methods")
             return methods
         except Exception as e:
             self.logger.error(f"Failed to get available methods: {e}")
             raise
 
+    async def get_available_labware(self) -> List[str]:
+        """Get a list of available labware from FluentControl.
+
+        Returns:
+            List[str]: List of labware names that are configured in FluentControl.
+        """
+        try:
+            # Try to get labware through variables first
+            variables = self.fluent.get_variable_names()
+            labware = [v for v in variables if v.startswith("labware_")]
+            if labware:
+                return labware
+
+            # If no labware variables, try to get through method parameters
+            methods = await self.get_available_methods()
+            if methods:
+                try:
+                    params = await self.get_method_parameters(methods[0])
+                    labware_params = [p for p in params if "labware" in p.lower()]
+                    if labware_params:
+                        return labware_params
+                except Exception:
+                    pass
+
+            self.logger.warning("No labware found in FluentControl")
+            return []
+        except Exception as e:
+            self.logger.error(f"Error getting available labware: {e}")
+            raise
+
     async def get_method_parameters(self, method_name: str) -> Dict[str, Any]:
-        """Get the parameters for a specific method.
+        """Get parameters for a specific method.
 
         Args:
             method_name: Name of the method to get parameters for.
 
         Returns:
-            Dict[str, Any]: Dictionary of parameter names and their types/values.
+            Dict[str, Any]: Dictionary of parameter names and their values.
         """
-        if self.simulation_mode:
-            return {"param1": "value1", "param2": "value2"}
-
         try:
-            params = await self.fluent.get_method_parameters(method_name)
-            self.logger.info(f"Retrieved parameters for method: {method_name}")
-            return params
+            # Try to get method parameters through SiLA2 connector
+            if hasattr(self.fluent, 'get_method_parameters'):
+                params = self.fluent.get_method_parameters(method_name)
+                self.logger.info(f"Got parameters for method {method_name}")
+                return params
+
+            # If method doesn't exist, try to get through variables
+            variables = self.fluent.get_variable_names()
+            method_vars = [v for v in variables if v.startswith(f"{method_name}_")]
+            if method_vars:
+                return {v: self.fluent.get_variable_value(v) for v in method_vars}
+
+            self.logger.warning(f"No parameters found for method {method_name}")
+            return {}
         except Exception as e:
-            self.logger.error(f"Failed to get method parameters: {e}")
+            self.logger.error(f"Error getting method parameters: {e}")
             raise
 
     async def add_to_worklist(self, method_name: str, parameters: Dict[str, Any]) -> bool:
@@ -187,18 +278,21 @@ class Fluent(LiquidHandlerBackend):
             parameters: Dictionary of parameters for the method.
 
         Returns:
-            bool: True if successful, False otherwise.
+            bool: True if successful.
         """
-        if self.simulation_mode:
-            self.logger.info(f"Simulation: Added {method_name} to worklist")
-            return True
-
         try:
-            await self.fluent.add_to_worklist(method_name, parameters)
-            self.logger.info(f"Added {method_name} to worklist")
+            # Prepare the method first
+            self.fluent.prepare_method(method_name)
+            self.logger.info(f"Prepared method {method_name}")
+
+            # Set any parameters
+            for name, value in parameters.items():
+                if hasattr(self.fluent, 'set_variable_value'):
+                    self.fluent.set_variable_value(name, value)
+
             return True
         except Exception as e:
-            self.logger.error(f"Failed to add method to worklist: {e}")
+            self.logger.error(f"Error adding method to worklist: {e}")
             return False
 
     async def clear_worklist(self) -> bool:
@@ -223,52 +317,44 @@ class Fluent(LiquidHandlerBackend):
         """Get the current worklist.
 
         Returns:
-            List[Dict[str, Any]]: List of methods in the worklist with their parameters.
+            List[Dict[str, Any]]: List of methods in the worklist.
         """
-        if self.simulation_mode:
-            return []
-
         try:
-            worklist = await self.fluent.get_worklist()
-            self.logger.info("Retrieved current worklist")
-            return worklist
+            if hasattr(self.fluent, 'get_worklist'):
+                worklist = self.fluent.get_worklist()
+                self.logger.info("Got current worklist")
+                return worklist
+            return []
         except Exception as e:
-            self.logger.error(f"Failed to get worklist: {e}")
+            self.logger.error(f"Error getting worklist: {e}")
             raise
 
     async def run_worklist(self) -> bool:
         """Run the current worklist.
 
         Returns:
-            bool: True if successful, False otherwise.
+            bool: True if successful.
         """
-        if self.simulation_mode:
-            self.logger.info("Simulation: Running worklist")
-            return True
-
         try:
-            await self.fluent.run_worklist()
-            self.logger.info("Started worklist execution")
-            return True
+            if hasattr(self.fluent, 'run_method'):
+                self.fluent.run_method()
+                self.logger.info("Started worklist execution")
+                return True
+            return False
         except Exception as e:
-            self.logger.error(f"Failed to run worklist: {e}")
+            self.logger.error(f"Error running worklist: {e}")
             return False
 
     async def get_worklist_status(self) -> str:
         """Get the current status of the worklist.
 
         Returns:
-            str: Current status of the worklist.
+            str: Current status.
         """
-        if self.simulation_mode:
-            return "Completed"
-
         try:
-            status = await self.fluent.get_worklist_status()
-            self.logger.info(f"Worklist status: {status}")
-            return status
+            return self.fluent.state
         except Exception as e:
-            self.logger.error(f"Failed to get worklist status: {e}")
+            self.logger.error(f"Error getting worklist status: {e}")
             raise
 
     async def pause_worklist(self) -> bool:
@@ -325,7 +411,7 @@ class Fluent(LiquidHandlerBackend):
             self.logger.error(f"Failed to stop worklist: {e}")
             return False
 
-    # Core Liquid Handling Methods
+    # Core Liquid Handling Methods - Using Worklist Approach
 
     async def pick_up_tips(self, tip_spot: Resource, **backend_kwargs: Any) -> None:
         """Pick up tips from a tip spot.
@@ -339,12 +425,16 @@ class Fluent(LiquidHandlerBackend):
             return
 
         try:
-            # Convert tip spot to SiLA position
-            position = self._resource_to_position(tip_spot)
-            await self.fluent.pick_up_tips(position)
-            self.logger.info(f"Successfully picked up tips from {tip_spot}")
+            # Add tip pickup to worklist
+            parameters = {
+                "tip_spot": tip_spot.name,  # Use resource name as identifier
+                "num_channels": self.num_channels,
+                **backend_kwargs
+            }
+            await self.add_to_worklist("pick_up_tips", parameters)
+            self.logger.info(f"Added tip pickup from {tip_spot} to worklist")
         except Exception as e:
-            self.logger.error(f"Failed to pick up tips: {e}")
+            self.logger.error(f"Failed to add tip pickup to worklist: {e}")
             raise
 
     async def drop_tips(self, tip_spot: Resource, **backend_kwargs: Any) -> None:
@@ -359,12 +449,16 @@ class Fluent(LiquidHandlerBackend):
             return
 
         try:
-            # Convert tip spot to SiLA position
-            position = self._resource_to_position(tip_spot)
-            await self.fluent.drop_tips(position)
-            self.logger.info(f"Successfully dropped tips to {tip_spot}")
+            # Add tip drop to worklist
+            parameters = {
+                "tip_spot": tip_spot.name,  # Use resource name as identifier
+                "num_channels": self.num_channels,
+                **backend_kwargs
+            }
+            await self.add_to_worklist("drop_tips", parameters)
+            self.logger.info(f"Added tip drop to {tip_spot} to worklist")
         except Exception as e:
-            self.logger.error(f"Failed to drop tips: {e}")
+            self.logger.error(f"Failed to add tip drop to worklist: {e}")
             raise
 
     async def aspirate(
@@ -391,21 +485,20 @@ class Fluent(LiquidHandlerBackend):
             return
 
         try:
-            # Convert resource to SiLA position and liquid
-            position = self._resource_to_position(resource)
-            liquid = self._resource_to_liquid(resource)
-
-            await self.fluent.aspirate(
-                position=position,
-                volume=volume,
-                flow_rate=flow_rate,
-                liquid_height=liquid_height,
-                blow_out=blow_out,
-                liquid=liquid
-            )
-            self.logger.info(f"Successfully aspirated {volume}µL from {resource}")
+            # Add aspiration to worklist
+            parameters = {
+                "resource": resource.name,  # Use resource name as identifier
+                "volume": volume,
+                "flow_rate": flow_rate,
+                "liquid_height": liquid_height,
+                "blow_out": blow_out,
+                "num_channels": self.num_channels,
+                **backend_kwargs
+            }
+            await self.add_to_worklist("aspirate", parameters)
+            self.logger.info(f"Added aspiration from {resource} to worklist")
         except Exception as e:
-            self.logger.error(f"Failed to aspirate: {e}")
+            self.logger.error(f"Failed to add aspiration to worklist: {e}")
             raise
 
     async def dispense(
@@ -432,63 +525,47 @@ class Fluent(LiquidHandlerBackend):
             return
 
         try:
-            # Convert resource to SiLA position and liquid
-            position = self._resource_to_position(resource)
-            liquid = self._resource_to_liquid(resource)
-
-            await self.fluent.dispense(
-                position=position,
-                volume=volume,
-                flow_rate=flow_rate,
-                liquid_height=liquid_height,
-                blow_out=blow_out,
-                liquid=liquid
-            )
-            self.logger.info(f"Successfully dispensed {volume}µL to {resource}")
+            # Add dispense to worklist
+            parameters = {
+                "resource": resource.name,  # Use resource name as identifier
+                "volume": volume,
+                "flow_rate": flow_rate,
+                "liquid_height": liquid_height,
+                "blow_out": blow_out,
+                "num_channels": self.num_channels,
+                **backend_kwargs
+            }
+            await self.add_to_worklist("dispense", parameters)
+            self.logger.info(f"Added dispense to {resource} to worklist")
         except Exception as e:
-            self.logger.error(f"Failed to dispense: {e}")
+            self.logger.error(f"Failed to add dispense to worklist: {e}")
             raise
 
-    def _resource_to_position(self, resource: Resource) -> Position:
-        """Convert a PyLabRobot resource to a SiLA Position.
+    # Required abstract methods from LiquidHandlerBackend
+    async def aspirate96(self, resource: Resource, volume: float, flow_rate: float = 100.0, liquid_height: float = 1.0, blow_out: bool = True) -> None:
+        """Not implemented - required by abstract class."""
+        pass
 
-        Args:
-            resource: The resource to convert.
+    async def dispense96(self, resource: Resource, volume: float, flow_rate: float = 100.0, liquid_height: float = 1.0, blow_out: bool = True) -> None:
+        """Not implemented - required by abstract class."""
+        pass
 
-        Returns:
-            Position: The SiLA Position object.
+    async def pick_up_tips96(self, resource: Resource) -> None:
+        """Not implemented - required by abstract class."""
+        pass
 
-        Raises:
-            ValueError: If the resource does not have a location.
-        """
-        if not hasattr(resource, "location"):
-            raise ValueError(f"Resource {resource} does not have a location")
+    async def drop_tips96(self, resource: Resource) -> None:
+        """Not implemented - required by abstract class."""
+        pass
 
-        location = resource.location
-        return Position(
-            x=location.x,
-            y=location.y,
-            z=location.z
-        )
+    async def pick_up_resource(self, resource: Resource) -> None:
+        """Not implemented - required by abstract class."""
+        pass
 
-    def _resource_to_liquid(self, resource: Resource) -> Liquid:
-        """Convert a PyLabRobot resource's liquid to a SiLA Liquid.
+    async def drop_resource(self, resource: Resource) -> None:
+        """Not implemented - required by abstract class."""
+        pass
 
-        Args:
-            resource: The resource to convert.
-
-        Returns:
-            Liquid: The SiLA Liquid object.
-        """
-        if not hasattr(resource, "liquid"):
-            return Liquid.WATER  # Default to water if no liquid specified
-
-        liquid = resource.liquid
-        # Map PyLabRobot liquid types to SiLA liquid types
-        liquid_map = {
-            "water": Liquid.WATER,
-            "dmso": Liquid.DMSO,
-            "ethanol": Liquid.ETHANOL,
-            # Add more mappings as needed
-        }
-        return liquid_map.get(liquid.name.lower(), Liquid.WATER)
+    async def move_picked_up_resource(self, resource: Resource, to_coordinate: Coordinate) -> None:
+        """Not implemented - required by abstract class."""
+        pass
