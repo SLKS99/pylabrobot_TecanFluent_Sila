@@ -191,3 +191,31 @@ If you use PyLabRobot in your research, please cite the following:
 **Disclaimer:** PyLabRobot is not officially endorsed or supported by any robot manufacturer. If you use a firmware driver such as the STAR driver provided here, you do so at your own risk. Usage of a firmware driver such as STAR may invalidate your warranty. Please contact us with any questions.
 
 _Developed for the Sculpting Evolution Group at the MIT Media Lab_
+
+# PyLabRobot
+
+A hardware agnostic platform for lab automation.
+
+## Installation
+
+### Basic Installation
+
+```bash
+pip install pylabrobot
+```
+
+### Development Installation
+
+```bash
+pip install -e ".[dev]"
+```
+
+### Tecan Fluent SiLA2 Support
+
+To use the Tecan Fluent SiLA2 connector, you need to:
+
+1. Visit the [Tecan Fluent SiLA2 Connector GitLab repository](https://gitlab.com/tecan/fluent-sila2-connector)
+2. Follow their installation instructions to set up the connector
+3. The connector provides SiLA2 support for the FluentControl API, allowing you to use the FluentControl API using programming languages outside of the .NET ecosystem
+
+Note: The SiLA2 connector is not included in the development dependencies as it requires access to Tecan's GitLab repository. Please contact Tecan support for access to their SiLA2 connector package.
