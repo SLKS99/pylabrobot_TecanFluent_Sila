@@ -2,13 +2,17 @@
 
 import asyncio
 import pytest
-from typing import Dict, Any
+from typing import Dict, Any, Generator
 
 from pylabrobot.liquid_handling.backends.tecan.fluent import Fluent
 
 @pytest.fixture
-async def fluent_backend():
-    """Create a Fluent backend instance for testing."""
+async def fluent_backend() -> Generator[Fluent, None, None]:
+    """Create a Fluent backend instance for testing.
+
+    Yields:
+        Fluent: A configured Fluent backend instance in simulation mode.
+    """
     backend = Fluent(
         num_channels=8,
         host="127.0.0.1",
@@ -20,8 +24,12 @@ async def fluent_backend():
     await backend.stop()
 
 @pytest.mark.asyncio
-async def test_method_management(fluent_backend):
-    """Test method management functionality."""
+async def test_method_management(fluent_backend: Fluent) -> None:
+    """Test method management functionality.
+
+    Args:
+        fluent_backend: The Fluent backend instance to test.
+    """
     # Get available methods
     methods = await fluent_backend.get_available_methods()
     assert isinstance(methods, list)
@@ -34,8 +42,12 @@ async def test_method_management(fluent_backend):
     assert "param2" in params
 
 @pytest.mark.asyncio
-async def test_worklist_management(fluent_backend):
-    """Test worklist management functionality."""
+async def test_worklist_management(fluent_backend: Fluent) -> None:
+    """Test worklist management functionality.
+
+    Args:
+        fluent_backend: The Fluent backend instance to test.
+    """
     # Clear worklist
     success = await fluent_backend.clear_worklist()
     assert success is True
@@ -54,8 +66,12 @@ async def test_worklist_management(fluent_backend):
     assert len(worklist) > 0
 
 @pytest.mark.asyncio
-async def test_worklist_control(fluent_backend):
-    """Test worklist control functionality."""
+async def test_worklist_control(fluent_backend: Fluent) -> None:
+    """Test worklist control functionality.
+
+    Args:
+        fluent_backend: The Fluent backend instance to test.
+    """
     # Run worklist
     success = await fluent_backend.run_worklist()
     assert success is True
@@ -83,8 +99,12 @@ async def test_worklist_control(fluent_backend):
     assert status == "Stopped"
 
 @pytest.mark.asyncio
-async def test_worklist_sequence(fluent_backend):
-    """Test a complete worklist sequence."""
+async def test_worklist_sequence(fluent_backend: Fluent) -> None:
+    """Test a complete worklist sequence.
+
+    Args:
+        fluent_backend: The Fluent backend instance to test.
+    """
     # Clear existing worklist
     await fluent_backend.clear_worklist()
 

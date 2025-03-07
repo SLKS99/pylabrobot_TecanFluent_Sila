@@ -1,7 +1,7 @@
 """Backend implementation for controlling Tecan Fluent using the official Tecan Fluent SiLA2 connector."""
 
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, cast
 
 # Import SiLA2 connector with detailed error handling
 HAS_TECAN_SILA = False
@@ -50,14 +50,14 @@ class Fluent(LiquidHandlerBackend):
         host: str = "127.0.0.1",
         port: int = 50052,
         insecure: bool = True,
-        username: str = None,
-        password: str = None,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
         discovery_time: int = 10,
         method_name: str = "pylabrobot",
         operation_timeout: int = 30,
         connection_timeout: int = 10,
         simulation_mode: bool = False
-    ):
+    ) -> None:
         """Create a new Tecan Fluent backend.
 
         Args:
@@ -101,7 +101,7 @@ class Fluent(LiquidHandlerBackend):
         self.operation_timeout = operation_timeout
         self.connection_timeout = connection_timeout
         self.simulation_mode = simulation_mode
-        self.fluent = None
+        self.fluent: Optional[TecanFluent] = None
 
         # Set up logging
         logging.basicConfig(level=logging.INFO)
@@ -113,7 +113,7 @@ class Fluent(LiquidHandlerBackend):
         """Get the number of channels on the liquid handler."""
         return self._num_channels
 
-    async def setup(self):
+    async def setup(self) -> None:
         """Set up the connection to the Fluent server."""
         try:
             self.logger.info(f"Connecting to Fluent server at {self.host}:{self.port}")
@@ -130,7 +130,7 @@ class Fluent(LiquidHandlerBackend):
             self.logger.error(f"Failed to connect to Fluent server: {e}")
             raise
 
-    async def stop(self):
+    async def stop(self) -> None:
         """Stop the connection to the Fluent server."""
         if self.fluent:
             try:
@@ -143,7 +143,11 @@ class Fluent(LiquidHandlerBackend):
     # SiLA Worklist and Method Management Methods
 
     async def get_available_methods(self) -> List[str]:
-        """Get a list of available methods from the Fluent server."""
+        """Get a list of available methods from the Fluent server.
+
+        Returns:
+            List[str]: List of available method names.
+        """
         if self.simulation_mode:
             return ["simulation_method"]
 
@@ -156,7 +160,14 @@ class Fluent(LiquidHandlerBackend):
             raise
 
     async def get_method_parameters(self, method_name: str) -> Dict[str, Any]:
-        """Get the parameters for a specific method."""
+        """Get the parameters for a specific method.
+
+        Args:
+            method_name: Name of the method to get parameters for.
+
+        Returns:
+            Dict[str, Any]: Dictionary of parameter names and their types/values.
+        """
         if self.simulation_mode:
             return {"param1": "value1", "param2": "value2"}
 
@@ -169,7 +180,15 @@ class Fluent(LiquidHandlerBackend):
             raise
 
     async def add_to_worklist(self, method_name: str, parameters: Dict[str, Any]) -> bool:
-        """Add a method to the worklist."""
+        """Add a method to the worklist.
+
+        Args:
+            method_name: Name of the method to add.
+            parameters: Dictionary of parameters for the method.
+
+        Returns:
+            bool: True if successful, False otherwise.
+        """
         if self.simulation_mode:
             self.logger.info(f"Simulation: Added {method_name} to worklist")
             return True
@@ -183,7 +202,11 @@ class Fluent(LiquidHandlerBackend):
             return False
 
     async def clear_worklist(self) -> bool:
-        """Clear the current worklist."""
+        """Clear the current worklist.
+
+        Returns:
+            bool: True if successful, False otherwise.
+        """
         if self.simulation_mode:
             self.logger.info("Simulation: Cleared worklist")
             return True
@@ -197,7 +220,11 @@ class Fluent(LiquidHandlerBackend):
             return False
 
     async def get_worklist(self) -> List[Dict[str, Any]]:
-        """Get the current worklist."""
+        """Get the current worklist.
+
+        Returns:
+            List[Dict[str, Any]]: List of methods in the worklist with their parameters.
+        """
         if self.simulation_mode:
             return []
 
@@ -210,7 +237,11 @@ class Fluent(LiquidHandlerBackend):
             raise
 
     async def run_worklist(self) -> bool:
-        """Run the current worklist."""
+        """Run the current worklist.
+
+        Returns:
+            bool: True if successful, False otherwise.
+        """
         if self.simulation_mode:
             self.logger.info("Simulation: Running worklist")
             return True
@@ -224,7 +255,11 @@ class Fluent(LiquidHandlerBackend):
             return False
 
     async def get_worklist_status(self) -> str:
-        """Get the current status of the worklist."""
+        """Get the current status of the worklist.
+
+        Returns:
+            str: Current status of the worklist.
+        """
         if self.simulation_mode:
             return "Completed"
 
@@ -237,7 +272,11 @@ class Fluent(LiquidHandlerBackend):
             raise
 
     async def pause_worklist(self) -> bool:
-        """Pause the current worklist execution."""
+        """Pause the current worklist execution.
+
+        Returns:
+            bool: True if successful, False otherwise.
+        """
         if self.simulation_mode:
             self.logger.info("Simulation: Paused worklist")
             return True
@@ -251,7 +290,11 @@ class Fluent(LiquidHandlerBackend):
             return False
 
     async def resume_worklist(self) -> bool:
-        """Resume the paused worklist execution."""
+        """Resume the paused worklist execution.
+
+        Returns:
+            bool: True if successful, False otherwise.
+        """
         if self.simulation_mode:
             self.logger.info("Simulation: Resumed worklist")
             return True
@@ -265,7 +308,11 @@ class Fluent(LiquidHandlerBackend):
             return False
 
     async def stop_worklist(self) -> bool:
-        """Stop the current worklist execution."""
+        """Stop the current worklist execution.
+
+        Returns:
+            bool: True if successful, False otherwise.
+        """
         if self.simulation_mode:
             self.logger.info("Simulation: Stopped worklist")
             return True
@@ -280,8 +327,13 @@ class Fluent(LiquidHandlerBackend):
 
     # Core Liquid Handling Methods
 
-    async def pick_up_tips(self, tip_spot: Resource, **backend_kwargs):
-        """Pick up tips from a tip spot."""
+    async def pick_up_tips(self, tip_spot: Resource, **backend_kwargs: Any) -> None:
+        """Pick up tips from a tip spot.
+
+        Args:
+            tip_spot: The resource containing the tips to pick up.
+            **backend_kwargs: Additional backend-specific arguments.
+        """
         if self.simulation_mode:
             self.logger.info(f"Simulation: Picking up tips from {tip_spot}")
             return
@@ -295,8 +347,13 @@ class Fluent(LiquidHandlerBackend):
             self.logger.error(f"Failed to pick up tips: {e}")
             raise
 
-    async def drop_tips(self, tip_spot: Resource, **backend_kwargs):
-        """Drop tips to a tip spot."""
+    async def drop_tips(self, tip_spot: Resource, **backend_kwargs: Any) -> None:
+        """Drop tips to a tip spot.
+
+        Args:
+            tip_spot: The resource to drop tips to.
+            **backend_kwargs: Additional backend-specific arguments.
+        """
         if self.simulation_mode:
             self.logger.info(f"Simulation: Dropping tips to {tip_spot}")
             return
@@ -317,9 +374,18 @@ class Fluent(LiquidHandlerBackend):
         flow_rate: float = 100,
         liquid_height: float = 1.0,
         blow_out: bool = True,
-        **backend_kwargs
-    ):
-        """Aspirate liquid from a resource."""
+        **backend_kwargs: Any
+    ) -> None:
+        """Aspirate liquid from a resource.
+
+        Args:
+            resource: The resource to aspirate from.
+            volume: Volume to aspirate in µL.
+            flow_rate: Flow rate in µL/s.
+            liquid_height: Height of liquid from bottom in mm.
+            blow_out: Whether to blow out after aspiration.
+            **backend_kwargs: Additional backend-specific arguments.
+        """
         if self.simulation_mode:
             self.logger.info(f"Simulation: Aspirating {volume}µL from {resource}")
             return
@@ -349,9 +415,18 @@ class Fluent(LiquidHandlerBackend):
         flow_rate: float = 100,
         liquid_height: float = 1.0,
         blow_out: bool = True,
-        **backend_kwargs
-    ):
-        """Dispense liquid to a resource."""
+        **backend_kwargs: Any
+    ) -> None:
+        """Dispense liquid to a resource.
+
+        Args:
+            resource: The resource to dispense to.
+            volume: Volume to dispense in µL.
+            flow_rate: Flow rate in µL/s.
+            liquid_height: Height of liquid from bottom in mm.
+            blow_out: Whether to blow out after dispensing.
+            **backend_kwargs: Additional backend-specific arguments.
+        """
         if self.simulation_mode:
             self.logger.info(f"Simulation: Dispensing {volume}µL to {resource}")
             return
@@ -375,7 +450,17 @@ class Fluent(LiquidHandlerBackend):
             raise
 
     def _resource_to_position(self, resource: Resource) -> Position:
-        """Convert a PyLabRobot resource to a SiLA Position."""
+        """Convert a PyLabRobot resource to a SiLA Position.
+
+        Args:
+            resource: The resource to convert.
+
+        Returns:
+            Position: The SiLA Position object.
+
+        Raises:
+            ValueError: If the resource does not have a location.
+        """
         if not hasattr(resource, "location"):
             raise ValueError(f"Resource {resource} does not have a location")
 
@@ -387,7 +472,14 @@ class Fluent(LiquidHandlerBackend):
         )
 
     def _resource_to_liquid(self, resource: Resource) -> Liquid:
-        """Convert a PyLabRobot resource's liquid to a SiLA Liquid."""
+        """Convert a PyLabRobot resource's liquid to a SiLA Liquid.
+
+        Args:
+            resource: The resource to convert.
+
+        Returns:
+            Liquid: The SiLA Liquid object.
+        """
         if not hasattr(resource, "liquid"):
             return Liquid.WATER  # Default to water if no liquid specified
 
